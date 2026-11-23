@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cuesheet → XML</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* VOICE: calm studio utility, one job done fast on a phone
+   IDEA: a broadcast log sheet — rows of cues on a running clock
+   PICTURE: the live timeline bar of the mix, split into cue blocks
+   COLOUR and TYPE: white / black, concrete planes, safety yellow on the action; Hanken Grotesk
+   LAYOUT: one column: file, time, result; table below */
+:root{color-scheme:light dark;--bg:light-dark(#fff,#1a1a19);--ink:light-dark(#111,#eee);--mute:light-dark(#666,#9a9a96);--plane:light-dark(#ececea,#262625);--line:light-dark(#d8d8d4,#3a3a38);--acc:#ffe600;--accInk:#111;--err:light-dark(#b00020,#ff8a80)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Hanken Grotesk",system-ui,sans-serif;overflow-x:clip}
+.wrap{max-width:760px;margin:0 auto;padding:clamp(20px,4vw,48px) max(5vw,16px) 64px}
+h1{font-size:clamp(30px,6vw,44px);line-height:1.05;font-weight:500;margin:0 0 6px;text-wrap:balance}
+.sub{color:var(--mute);margin:0 0 28px}
+.step{background:var(--plane);border-radius:14px;padding:18px;margin-bottom:14px}
+.step label{display:block;font-weight:700;margin-bottom:8px}
+.drop{display:flex;align-items:center;justify-content:center;gap:10px;min-height:88px;border:2px dashed var(--line);border-radius:10px;padding:14px;text-align:center;cursor:pointer;background:var(--bg)}
+.drop.has{border-style:solid;border-color:var(--ink)}
+.drop input{position:absolute;opacity:0;width:1px;height:1px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+textarea{width:100%;font:inherit;font-size:16px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);resize:vertical}
+textarea:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+input[type=text]{font:inherit;font-size:18px;padding:10px 12px;min-height:48px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);flex:1 1 160px}
+input:focus-visible,button:focus-visible,.drop:focus-within{outline:3px solid var(--acc);outline-offset:2px}
+.hint{color:var(--mute);font-size:14px;margin-top:6px}
+.btn{font:inherit;font-weight:700;min-height:48px;padding:10px 18px;border-radius:10px;border:1px solid var(--ink);background:var(--bg);color:var(--ink);cursor:pointer}
+.btn.main{background:var(--acc);color:var(--accInk);border-color:var(--acc);flex:1 1 220px;font-size:18px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.bar{display:flex;height:34px;border-radius:8px;overflow:hidden;margin:16px 0 6px;background:var(--bg)}
+.bar span{flex:1 1 0;border-right:2px solid var(--plane);background:var(--ink);opacity:.85}
+.bar span:nth-child(odd){opacity:.6}
+.msg{font-size:15px;margin:10px 0 0}.msg.err{color:var(--err)}
+table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:700;color:var(--mute)}
+td.t{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+pre{overflow-x:auto;background:var(--plane);border-radius:10px;padding:12px;font-size:12px;max-height:300px}
+details{margin-top:14px}summary{cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center}
+@media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:6em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:5.5em;margin-inline-start:-6em;color:var(--mute)}.stack td:empty{display:none}}
+@media(prefers-reduced-motion:no-preference){.bar span{transition:flex .3s}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Cuesheet → XML</h1>
+<p class="sub">Nahraj Excel s playlistom, zadaj celkový čas mixu a stiahni si XML.</p>
+
+<div class="step">
+  <label for="file">1. Excel s playlistom</label>
+  <div class="drop" id="drop"><input type="file" id="file" accept=".xlsx,.csv,.tsv,.txt"><span id="fname">Ťukni a vyber .xlsx (alebo .csv)</span></div>
+  <div class="hint" style="margin:12px 0 6px">…alebo v Google Sheets označ bunky aj s hlavičkou, skopíruj a vlož sem:</div>
+  <textarea id="paste" rows="4" placeholder="Artist	Track Name	Autori hudby	Vydavatel	Rok …"></textarea>
+</div>
+
+<div class="step">
+  <label for="total">2. Celkový čas mixu</label>
+  <div class="row"><input type="text" id="total" inputmode="decimal" placeholder="napr. 50:48 alebo 1:00:00" autocomplete="off"></div>
+  <div class="hint" id="totalHint">Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.</div>
+</div>
+
+<div class="step">
+  <label for="name">3. Názov súboru</label>
+  <div class="row"><input type="text" id="name" placeholder="napr. 1122pomala" autocomplete="off"><span>.xml</span></div>
+</div>
+
+<div class="row"><button class="btn main" id="dl" disabled>Stiahnuť XML</button><button class="btn" id="copy" disabled>Kopírovať</button></div>
+<p class="msg" id="msg" role="status"></p>
+
+<div id="out" hidden>
+  <div class="bar" id="bar"></div>
+  <div class="hint" id="barInfo"></div>
+  <table class="stack"><thead><tr><th>#</th><th>Interpret</th><th>Skladba</th><th>Začiatok</th><th>Koniec</th></tr></thead><tbody id="rows"></tbody></table>
+  <details><summary>Náhľad XML</summary><pre id="xml"></pre></details>
+</div>
+</div>
+
+<script>
+{
+const $=id=>document.getElementById(id);
+let tracks=[],xmlText='',srcName='';
+
+// ---------- XLSX reading (zip + XML, no libraries) ----------
+const u16=(b,o)=>b[o]|b[o+1]<<8, u32=(b,o)=>(b[o]|b[o+1]<<8|b[o+2]<<16|b[o+3]<<24)>>>0;
+async function unzip(buf){
+  const b=new Uint8Array(buf),files={};
+  let e=b.length-22;while(e>=0&&u32(b,e)!==0x06054b50)e--;
+  if(e<0)throw new Error('Súbor nie je platný .xlsx');
+  let p=u32(b,e+16);const n=u16(b,e+10);
+  for(let i=0;i<n;i++){
+    const method=u16(b,p+10),csize=u32(b,p+20),nl=u16(b,p+28),xl=u16(b,p+30),cl=u16(b,p+32),lo=u32(b,p+42);
+    const name=new TextDecoder().decode(b.subarray(p+46,p+46+nl));
+    p+=46+nl+xl+cl;
+    const ds=lo+30+u16(b,lo+26)+u16(b,lo+28),raw=b.subarray(ds,ds+csize);
+    files[name]={method,raw};
+  }
+  return async name=>{
+    const f=files[name];if(!f)return null;
+    if(f.method===0)return new TextDecoder().decode(f.raw);
+    const s=new Blob([f.raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return await new Response(s).text();
+  };
+}
+const unesc=s=>s.replace(/&(lt|gt|quot|apos|amp|#x?[0-9a-fA-F]+);/g,(m,c)=>c==='lt'?'<':c==='gt'?'>':c==='quot'?'"':c==='apos'?"'":c==='amp'?'&':String.fromCodePoint(c[1]==='x'?parseInt(c.slice(2),16):+c.slice(1)));
+const textOf=x=>[...x.matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)].map(m=>unesc(m[1])).join('');
+const colIdx=ref=>{let n=0;for(const ch of ref.match(/^[A-Z]+/)[0])n=n*26+ch.charCodeAt(0)-64;return n-1};
+async function readXlsx(buf){
+  const get=await unzip(buf);
+  const ss=await get('xl/sharedStrings.xml');
+  const shared=ss?[...ss.matchAll(/<si>([\s\S]*?)<\/si>/g)].map(m=>textOf(m[1])):[];
+  let path='xl/worksheets/sheet1.xml';
+  const wb=await get('xl/workbook.xml'),rels=await get('xl/_rels/workbook.xml.rels');
+  if(wb&&rels){
+    const rid=(wb.match(/<sheet\b[^>]*r:id="([^"]+)"/)||[])[1];
+    const rel=rid&&[...rels.matchAll(/<Relationship\b[^>]*>/g)].map(m=>m[0]).find(r=>r.includes(`Id="${rid}"`));
+    const t=rel&&(rel.match(/Target="([^"]+)"/)||[])[1];
+    if(t)path=t.startsWith('/')?t.slice(1):'xl/'+t.replace(/^\.\//,'');
+  }
+  const sh=await get(path);if(!sh)throw new Error('V súbore som nenašiel hárok');
+  const rows=[];
+  for(const rm of sh.matchAll(/<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)){
+    const row=[];
+    for(const cm of (rm[1]||'').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)){
+      const at=cm[1],body=cm[2]||'',r=(at.match(/\br="([A-Z]+)\d+"/)||[])[1],t=(at.match(/\bt="(\w+)"/)||[])[1];
+      const v=(body.match(/<v>([\s\S]*?)<\/v>/)||[])[1];
+      let val='';
+      if(t==='s')val=shared[+v]??'';else if(t==='inlineStr')val=textOf(body);else if(v!=null)val=t==='str'||t==='b'?unesc(v):(isNaN(+v)?unesc(v):+v);
+      row[r?colIdx(r):row.length]=val;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function readCsv(txt){
+  const h=txt.split('\n')[0],cnt=c=>h.split(c).length;
+  const sep=h.includes('\t')?'\t':cnt(';')>cnt(',')?';':',';
+  const rows=[];let row=[],cur='',q=false;
+  for(let i=0;i<txt.length;i++){const ch=txt[i];
+    if(q){if(ch==='"'){if(txt[i+1]==='"'){cur+='"';i++}else q=false}else cur+=ch}
+    else if(ch==='"')q=true;else if(ch===sep){row.push(cur);cur=''}
+    else if(ch==='\n'||ch==='\r'){if(ch==='\r'&&txt[i+1]==='\n')i++;row.push(cur);rows.push(row);row=[];cur=''}
+    else cur+=ch}
+  if(cur||row.length){row.push(cur);rows.push(row)}
+  return rows;
+}
+
+// ---------- Mapping ----------
+const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
+const COLS={artist:['artist','interpret'],name:['trackname','nazov','skladba','track','title'],writers:['autorihudby','autori','writers','autor'],label:['vydavatel','label','copyright'],year:['rok','year'],isMusic:['skismusic'],isText:['skistext'],skAuthor:['skauthor'],len:['dlzkaskladby','dlzka','length','duration']};
+const cell=v=>v==null?'':String(v).trim();
+function toTracks(rows){
+  const hi=rows.findIndex(r=>r&&r.some(c=>COLS.artist.includes(norm(c))));
+  if(hi<0)throw new Error('Nenašiel som hlavičku so stĺpcom „Artist“');
+  const head=rows[hi].map(norm),map={};
+  for(const k in COLS){let i=head.findIndex(h=>COLS[k].includes(h));if(i<0)i=head.findIndex(h=>h&&COLS[k].some(c=>h.startsWith(c)));map[k]=i}
+  const g=(r,k)=>map[k]<0?'':cell(r[map[k]]);
+  return rows.slice(hi+1).filter(r=>r&&(g(r,'artist')||g(r,'name'))).map(r=>({artist:g(r,'artist'),name:g(r,'name'),writers:g(r,'writers'),label:g(r,'label'),year:g(r,'year').replace(/\.0+$/,''),isMusic:g(r,'isMusic'),isText:g(r,'isText'),skAuthor:g(r,'skAuthor')}));
+}
+function parseTime(s){
+  s=String(s).trim().replace(',','.');if(!s)return null;
+  if(/^\d+(\.\d+)?$/.test(s))return Math.round(+s*60);
+  const p=s.split(':');if(p.length<2||p.length>3||p.some(x=>!/^\d+(\.\d+)?$/.test(x)))return null;
+  return Math.round(p.reduce((a,x)=>a*60+ +x,0));
+}
+const fmt=sec=>{const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function buildXml(list,total){
+  const n=list.length,b=i=>Math.round(i*total/n);
+  let x='<?xml version="1.0" encoding="UTF-8"?>\n<METADATA>\n<VERSION>a01</VERSION>\n';
+  list.forEach((t,i)=>{t.start=b(i);t.end=b(i+1);
+    const f=[['Class','MUS_FM'],['Artist',t.artist],['Name',t.name],['Writers',t.writers],['CopyrightP',t.label],['YearP',t.year],['SK_IsMusic',t.isMusic],['SK_IsText',t.isText],['SKAuthor',t.skAuthor],['StartPos',t.start],['EndPos',t.end],['CopyrightC',t.label],['YearC',t.year]];
+    x+='  <work>\n'+f.map(([k,v])=>`    <${k}>${esc(v)}</${k}>\n`).join('')+'  </work>\n'});
+  return x+'</METADATA>';
+}
+
+// ---------- UI ----------
+function render(){
+  const total=parseTime($('total').value);
+  $('totalHint').textContent=$('total').value.trim()?(total?`= ${total} s (${fmt(total)})`:'Neviem prečítať čas. Skús napr. 50:48'):'Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.';
+  const ok=tracks.length&&total;
+  $('dl').disabled=$('copy').disabled=!ok;
+  $('out').hidden=!tracks.length;
+  if(!tracks.length)return;
+  xmlText=ok?buildXml(tracks,total):'';
+  const per=ok?total/tracks.length:0;
+  $('bar').innerHTML=tracks.map(()=>'<span></span>').join('');
+  $('barInfo').textContent=`${tracks.length} skladieb`+(ok?` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`:'');
+  $('rows').innerHTML=tracks.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${ok?fmt(t.start):''}</td><td class="t">${ok?fmt(t.end):''}</td></tr>`).join('');
+  $('xml').textContent=xmlText||'Zadaj celkový čas mixu.';
+}
+function say(t,err){$('msg').textContent=t;$('msg').className='msg'+(err?' err':'')}
+
+$('file').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  srcName=f.name.replace(/\.[^.]+$/,'');
+  $('fname').textContent=f.name;$('drop').classList.add('has');
+  if(!$('name').value)$('name').value=srcName;
+  try{
+    const rows=/\.csv$/i.test(f.name)?readCsv(await f.text()):await readXlsx(await f.arrayBuffer());
+    tracks=toTracks(rows);
+    say(tracks.length?'':'V tabuľke nie sú žiadne skladby.',!tracks.length);
+  }catch(err){tracks=[];say(err.message||'Súbor sa nepodarilo prečítať',true)}
+  render();
+});
+$('paste').addEventListener('input',()=>{
+  const t=$('paste').value;
+  if(!t.trim()){tracks=[];say('');return render()}
+  try{tracks=toTracks(readCsv(t));say(tracks.length?'':'Vo vloženom texte nie sú žiadne skladby.',!tracks.length)}
+  catch(err){tracks=[];say(err.message,true)}
+  $('fname').textContent='Ťukni a vyber .xlsx (alebo .csv)';$('drop').classList.remove('has');$('file').value='';
+  render();
+});
+$('total').addEventListener('input',render);
+
+// zip (store) fallback for hosts that refuse .xml downloads
+function crc32(b){let c,crc=-1;for(let i=0;i<b.length;i++){c=(crc^b[i])&255;for(let k=0;k<8;k++)c=c&1?(c>>>1)^0xEDB88320:c>>>1;crc=(crc>>>8)^c}return(crc^-1)>>>0}
+function zip1(name,data){
+  const n=new TextEncoder().encode(name),crc=crc32(data),L=30+n.length,C=46+n.length,out=new Uint8Array(L+data.length+C+22),v=new DataView(out.buffer);
+  v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint16(6,0x800,true);v.setUint32(14,crc,true);v.setUint32(18,data.length,true);v.setUint32(22,data.length,true);v.setUint16(26,n.length,true);out.set(n,30);out.set(data,L);
+  let o=L+data.length;v.setUint32(o,0x02014b50,true);v.setUint16(o+4,20,true);v.setUint16(o+6,20,true);v.setUint16(o+8,0x800,true);v.setUint32(o+16,crc,true);v.setUint32(o+20,data.length,true);v.setUint32(o+24,data.length,true);v.setUint16(o+28,n.length,true);out.set(n,o+46);
+  o+=C;v.setUint32(o,0x06054b50,true);v.setUint16(o+8,1,true);v.setUint16(o+10,1,true);v.setUint32(o+12,C,true);v.setUint32(o+16,L+data.length,true);
+  return out;
+}
+let dlCap=null;
+try{window.claude&&claude.use&&claude.use('downloads').then(d=>{dlCap=d}).catch(()=>{})}catch(e){}
+
+$('dl').addEventListener('click',async()=>{
+  const fn=($('name').value.trim()||srcName||'cuesheet').replace(/\.xml$/i,'')+'.xml';
+  if(dlCap){
+    try{await dlCap.save({filename:fn,data:xmlText});say('Uložené: '+fn);return}
+    catch(err){
+      if(err&&err.code==='declined')return say('Sťahovanie zrušené.');
+      if(err&&err.code==='rejected_extension'){
+        try{await dlCap.save({filename:fn.replace(/\.xml$/,'.zip'),data:zip1(fn,new TextEncoder().encode(xmlText))});say('Uložené ako .zip, vnútri je '+fn);return}
+        catch(e2){if(e2&&e2.code==='declined')return say('Sťahovanie zrušené.')}
+      }
+    }
+  }
+  try{
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([xmlText],{type:'application/xml'}));a.download=fn;document.body.appendChild(a);a.click();a.remove();
+    say('Stiahnuté: '+fn);
+  }catch(e){say('Sťahovanie tu nefunguje, použi Kopírovať.',true)}
+});
+$('copy').addEventListener('click',async()=>{
+  try{await navigator.clipboard.writeText(xmlText);say('XML skopírované do schránky.')}catch(e){say('Kopírovanie nefunguje, XML nájdeš v náhľade nižšie.',true)}
+});
+render();
+}
+</script>
+<script>new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})</script>
+</body>
+</html>
