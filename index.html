@@ -71,7 +71,10 @@ audio{width:100%;margin-top:10px}
   <div class="row"><input type="text" id="total" inputmode="decimal" placeholder="napr. 50:48 alebo 1:00:00" autocomplete="off"></div>
   <div class="hint" id="totalHint">Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.</div>
   <div class="hint" style="margin:14px 0 6px"><b>Nepovinné:</b> nahraj audio mixu a skutočné dĺžky skladieb sa nájdu podľa prechodov.</div>
+  <div class="row"><input type="text" id="alink" placeholder="Link na mix (Google Drive alebo .mp3/.m4a)" autocomplete="off" inputmode="url"><button class="btn" id="aload">Načítať</button></div>
+  <div class="hint" style="margin:8px 0 6px">…alebo vyber súbor z telefónu:</div>
   <div class="drop" id="adrop"><input type="file" id="audio" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg"><span id="aname">Ťukni a vyber audio mixu</span></div>
+  <details id="keyBox"><summary>Google API kľúč</summary><div class="row"><input type="text" id="gkey" placeholder="AIza…" autocomplete="off"></div><div class="hint">Potrebný na načítanie mixu z Google Drive. Uloží sa len v tomto prehliadači.</div></details>
   <div class="row" id="modeRow" hidden style="margin-top:10px">
     <label class="opt"><input type="radio" name="mode" value="audio" checked> Časy z audia</label>
     <label class="opt"><input type="radio" name="mode" value="even"> Rovnomerne</label>
@@ -297,11 +300,44 @@ $('paste').addEventListener('input',()=>{
 });
 $('total').addEventListener('input',render);
 
-$('audio').addEventListener('change',async e=>{
+$('audio').addEventListener('change',e=>{
   const f=e.target.files[0];if(!f)return;
   $('aname').textContent=f.name;$('adrop').classList.add('has');
+  loadAudio(f);
+});
+// Google API key: built-in default (restricted to this site) or the viewer's own
+const DEFAULT_GKEY='';
+let gkey='';try{gkey=localStorage.getItem('gkey')||''}catch(_){}
+$('gkey').value=gkey;
+$('gkey').addEventListener('change',()=>{gkey=$('gkey').value.trim();try{localStorage.setItem('gkey',gkey)}catch(_){}});
+const driveId=u=>(u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=)([\w-]{20,})/)||u.match(/docs\.google\.com\/[^ ]*\/d\/([\w-]{20,})/)||[])[1];
+$('aload').addEventListener('click',async()=>{
+  const u=$('alink').value.trim();if(!u)return say('Vlož link na mix.',true);
+  const id=driveId(u),key=gkey||DEFAULT_GKEY;
+  if(id&&!key){$('keyBox').open=true;return say('Na načítanie z Google Drive treba Google API kľúč.',true)}
+  const url=id?`https://www.googleapis.com/drive/v3/files/${id}?alt=media&key=${encodeURIComponent(key)}`:u;
+  if(!/^https:\/\//.test(url))return say('Link musí začínať https://',true);
+  $('aload').disabled=true;
+  try{
+    say('Sťahujem mix…');
+    const r=await fetch(url);
+    if(!r.ok){
+      if(r.status===403||r.status===404)throw new Error(id?'Súbor nie je zdieľaný pre „každého s odkazom“, alebo API kľúč nefunguje ('+r.status+').':'Server súbor nevydal ('+r.status+').');
+      throw new Error('Server vrátil chybu '+r.status);
+    }
+    const len=+r.headers.get('content-length')||0,rd=r.body.getReader(),parts=[];let got=0,last=0;
+    for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;
+      if(Date.now()-last>300){last=Date.now();say(`Sťahujem mix… ${len?Math.round(got/len*100)+' %':(got/1048576).toFixed(0)+' MB'}`)}}
+    let name=decodeURIComponent((u.split('?')[0].split('/').pop()||'mix'));if(id)name='mix z Google Drive';
+    $('aname').textContent=name;$('adrop').classList.remove('has');$('audio').value='';
+    await loadAudio(new Blob(parts));
+  }catch(err){
+    say(err instanceof TypeError?'Tento server nedovolí aplikácii mix stiahnuť. Stiahni ho do telefónu a vyber ako súbor.':(err.message||String(err)),true);
+  }finally{$('aload').disabled=false}
+});
+async function loadAudio(f){
   const pl=$('player');try{URL.revokeObjectURL(pl.src)}catch(_){}pl.src=URL.createObjectURL(f);pl.hidden=false;
-  ana=null;bounds=null;say('Načítavam audio… (pri dlhom mixe to môže trvať aj minútu)');
+  ana=null;bounds=null;say('Spracúvam audio… (pri dlhom mixe to môže trvať aj minútu)');
   await new Promise(r=>setTimeout(r,50));
   try{
     const sr=11025,ctx=new OfflineAudioContext(1,sr,sr),buf=await ctx.decodeAudioData(await f.arrayBuffer());
@@ -314,7 +350,7 @@ $('audio').addEventListener('change',async e=>{
     say(tracks.length?'Hotovo. Skontroluj prechody v tabuľke.':'Audio načítané, teraz pridaj playlist.');
   }catch(err){say('Audio sa nepodarilo načítať ('+(err.message||err)+'). Skús mp3 alebo m4a.',true)}
   render();
-});
+}
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',render));
 $('rows').addEventListener('change',e=>{
   const t=e.target;if(!t.classList.contains('tin'))return;
