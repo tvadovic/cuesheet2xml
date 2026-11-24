@@ -306,7 +306,7 @@ $('audio').addEventListener('change',e=>{
   loadAudio(f);
 });
 // Google API key: built-in default (restricted to this site) or the viewer's own
-const DEFAULT_GKEY='';
+const DEFAULT_GKEY='AIzaSyA6F3gFS_tEhMIkzh0rZH9rd-IezauijLw';
 let gkey='';try{gkey=localStorage.getItem('gkey')||''}catch(_){}
 $('gkey').value=gkey;
 $('gkey').addEventListener('change',()=>{gkey=$('gkey').value.trim();try{localStorage.setItem('gkey',gkey)}catch(_){}});
