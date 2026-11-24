@@ -44,13 +44,20 @@ td.t{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 pre{overflow-x:auto;background:var(--plane);border-radius:10px;padding:12px;font-size:12px;max-height:300px}
 details{margin-top:14px}summary{cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center}
 @media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:6em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:5.5em;margin-inline-start:-6em;color:var(--mute)}.stack td:empty{display:none}}
+.fig{position:relative;height:120px;margin-top:12px;background:var(--bg);border-radius:10px}.fig>svg{position:absolute;inset:0;width:100%;height:100%}
+audio{width:100%;margin-top:10px}
+.opt{display:flex;align-items:center;gap:6px;min-height:44px;font-weight:500!important;margin:0!important}
+.opt input{width:20px;height:20px;accent-color:var(--ink)}
+.tin{width:5.2em;font:inherit;font-size:16px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+.play{font:inherit;min-width:44px;min-height:40px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);cursor:pointer;margin-left:4px}
+.bar span{flex-basis:0}
 @media(prefers-reduced-motion:no-preference){.bar span{transition:flex .3s}}
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>Cuesheet → XML</h1>
-<p class="sub">Nahraj Excel s playlistom, zadaj celkový čas mixu a stiahni si XML.</p>
+<p class="sub">Nahraj Excel s playlistom, zadaj celkový čas mixu alebo nahraj jeho audio a stiahni si XML.</p>
 
 <div class="step">
   <label for="file">1. Excel s playlistom</label>
@@ -63,6 +70,14 @@ details{margin-top:14px}summary{cursor:pointer;font-weight:700;min-height:44px;d
   <label for="total">2. Celkový čas mixu</label>
   <div class="row"><input type="text" id="total" inputmode="decimal" placeholder="napr. 50:48 alebo 1:00:00" autocomplete="off"></div>
   <div class="hint" id="totalHint">Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.</div>
+  <div class="hint" style="margin:14px 0 6px"><b>Nepovinné:</b> nahraj audio mixu a skutočné dĺžky skladieb sa nájdu podľa prechodov.</div>
+  <div class="drop" id="adrop"><input type="file" id="audio" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg"><span id="aname">Ťukni a vyber audio mixu</span></div>
+  <div class="row" id="modeRow" hidden style="margin-top:10px">
+    <label class="opt"><input type="radio" name="mode" value="audio" checked> Časy z audia</label>
+    <label class="opt"><input type="radio" name="mode" value="even"> Rovnomerne</label>
+  </div>
+  <div class="fig" id="fig" hidden><svg id="nov" aria-label="Zmeny zvuku v mixe"></svg></div>
+  <audio id="player" controls hidden preload="metadata"></audio>
 </div>
 
 <div class="step">
@@ -84,7 +99,7 @@ details{margin-top:14px}summary{cursor:pointer;font-weight:700;min-height:44px;d
 <script>
 {
 const $=id=>document.getElementById(id);
-let tracks=[],xmlText='',srcName='';
+let tracks=[],xmlText='',srcName='',ana=null,bounds=null;
 
 // ---------- XLSX reading (zip + XML, no libraries) ----------
 const u16=(b,o)=>b[o]|b[o+1]<<8, u32=(b,o)=>(b[o]|b[o+1]<<8|b[o+2]<<16|b[o+3]<<24)>>>0;
@@ -170,13 +185,66 @@ function parseTime(s){
 }
 const fmt=sec=>{const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-function buildXml(list,total){
-  const n=list.length,b=i=>Math.round(i*total/n);
+function buildXml(list,total,bounds){
+  const n=list.length,b=bounds&&bounds.length===n+1?i=>bounds[i]:i=>Math.round(i*total/n);
   let x='<?xml version="1.0" encoding="UTF-8"?>\n<METADATA>\n<VERSION>a01</VERSION>\n';
   list.forEach((t,i)=>{t.start=b(i);t.end=b(i+1);
     const f=[['Class','MUS_FM'],['Artist',t.artist],['Name',t.name],['Writers',t.writers],['CopyrightP',t.label],['YearP',t.year],['SK_IsMusic',t.isMusic],['SK_IsText',t.isText],['SKAuthor',t.skAuthor],['StartPos',t.start],['EndPos',t.end],['CopyrightC',t.label],['YearC',t.year]];
     x+='  <work>\n'+f.map(([k,v])=>`    <${k}>${esc(v)}</${k}>\n`).join('')+'  </work>\n'});
   return x+'</METADATA>';
+}
+
+// ---------- Audio: find track changes ----------
+function fft(re,im){
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]]}}
+  for(let len=2;len<=n;len<<=1){const a=-2*Math.PI/len,wr=Math.cos(a),wi=Math.sin(a);
+    for(let i=0;i<n;i+=len){let cr=1,ci=0;for(let k=0;k<len/2;k++){const p=i+k,q=p+len/2,tr=re[q]*cr-im[q]*ci,ti=re[q]*ci+im[q]*cr;re[q]=re[p]-tr;im[q]=im[p]-ti;re[p]+=tr;im[p]+=ti;const nr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=nr}}}
+}
+// returns a change score per 0.5 s frame (0..1)
+function analyze(x,sr){
+  const hopS=0.5,hop=Math.round(sr*hopS),N=2048,B=20,F=Math.floor(x.length/hop),D=B+1;
+  const win=new Float32Array(N).map((_,i)=>0.5-0.5*Math.cos(2*Math.PI*i/(N-1)));
+  const lo=50,hi=Math.min(8000,sr/2*0.95),edges=[];
+  for(let b=0;b<=B;b++)edges.push(Math.max(1,Math.round(lo*Math.pow(hi/lo,b/B)/sr*N)));
+  const feat=new Float32Array(F*D),re=new Float64Array(N),im=new Float64Array(N);
+  for(let f=0;f<F;f++){
+    const c=f*hop+(hop>>1)-(N>>1);let e=0;
+    for(let i=0;i<N;i++){const v=x[c+i]||0;re[i]=v*win[i];im[i]=0;e+=v*v}
+    fft(re,im);
+    for(let b=0;b<B;b++){let s=0;for(let k=edges[b];k<Math.max(edges[b]+1,edges[b+1]);k++)s+=re[k]*re[k]+im[k]*im[k];feat[f*D+b]=Math.log10(s+1e-9)}
+    feat[f*D+B]=Math.log10(e/N+1e-10);
+  }
+  for(let d=0;d<D;d++){let m=0,v=0;for(let f=0;f<F;f++)m+=feat[f*D+d];m/=F;for(let f=0;f<F;f++)v+=(feat[f*D+d]-m)**2;const sd=Math.sqrt(v/F)||1;for(let f=0;f<F;f++)feat[f*D+d]=(feat[f*D+d]-m)/sd}
+  const ps=new Float64Array((F+1)*D);
+  for(let f=0;f<F;f++)for(let d=0;d<D;d++)ps[(f+1)*D+d]=ps[f*D+d]+feat[f*D+d];
+  const W=Math.min(24,Math.floor(F/4)||1),score=new Float32Array(F);
+  for(let t=1;t<F;t++){const w=Math.min(W,t,F-t);if(w<2)continue;let s=0;
+    for(let d=0;d<D;d++){const l=(ps[t*D+d]-ps[(t-w)*D+d])/w,r=(ps[(t+w)*D+d]-ps[t*D+d])/w;s+=(l-r)**2}
+    score[t]=Math.sqrt(s/D)*Math.sqrt(w/W)}
+  // quiet moments between tracks help too
+  for(let t=2;t<F-2;t++){let e=0;for(let k=-2;k<=2;k++)e+=feat[(t+k)*D+B];e/=5;if(e<0)score[t]+=0.35*-e}
+  let mx=0;for(const v of score)mx=Math.max(mx,v);if(mx)for(let i=0;i<F;i++)score[i]/=mx;
+  return{score,hop:hopS};
+}
+// best n-1 change points with a minimum track length; returns seconds [0,…,total]
+function pickBounds(score,hopS,n,total){
+  const even=()=>Array.from({length:n+1},(_,i)=>Math.round(i*total/n));
+  if(n<2)return[0,total];
+  const T=Math.min(score.length,Math.floor(total/hopS)),minL=Math.max(1,Math.floor(Math.max(20,0.3*total/n)/hopS));
+  if(minL*n>T)return even();
+  let prev=new Float64Array(T).fill(-Infinity);const back=[];
+  for(let t=minL;t<T;t++)prev[t]=score[t];
+  back.push(null);
+  for(let k=2;k<n;k++){
+    const cur=new Float64Array(T).fill(-Infinity),bk=new Int32Array(T).fill(-1);let best=-Infinity,arg=-1;
+    for(let t=0;t<T;t++){const s=t-minL;if(s>=0&&prev[s]>best){best=prev[s];arg=s}if(arg>=0)cur[t]=score[t]+best,bk[t]=arg}
+    back.push(bk);prev=cur;
+  }
+  let end=-1,bv=-Infinity;for(let t=0;t<=T-minL;t++)if(prev[t]>bv){bv=prev[t];end=t}
+  if(end<0)return even();
+  const fr=[end];for(let k=n-2;k>=1;k--)fr.unshift(back[k][fr[0]]);
+  return[0,...fr.map(f=>Math.round(f*hopS)),total];
 }
 
 // ---------- UI ----------
@@ -187,13 +255,24 @@ function render(){
   $('dl').disabled=$('copy').disabled=!ok;
   $('out').hidden=!tracks.length;
   if(!tracks.length)return;
-  xmlText=ok?buildXml(tracks,total):'';
+  if(ana&&ok&&(!bounds||bounds.length!==tracks.length+1||bounds[bounds.length-1]!==total))bounds=pickBounds(ana.score,ana.hop,tracks.length,total);
+  const useA=!!(ana&&ok&&mode()==='audio'&&bounds);
+  xmlText=ok?buildXml(tracks,total,useA?bounds:null):'';
   const per=ok?total/tracks.length:0;
-  $('bar').innerHTML=tracks.map(()=>'<span></span>').join('');
-  $('barInfo').textContent=`${tracks.length} skladieb`+(ok?` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`:'');
-  $('rows').innerHTML=tracks.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${ok?fmt(t.start):''}</td><td class="t">${ok?fmt(t.end):''}</td></tr>`).join('');
+  $('bar').innerHTML=tracks.map(t=>`<span style="flex-grow:${ok?Math.max(1,t.end-t.start):1}"></span>`).join('');
+  $('barInfo').textContent=`${tracks.length} skladieb`+(ok?(useA?' · časy podľa audia, skontroluj prechody tlačidlom ▶':` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`):'');
+  $('rows').innerHTML=tracks.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${!ok?'':useA&&i>0?`<input class="tin" data-i="${i}" value="${fmt(t.start)}" inputmode="decimal" aria-label="Začiatok skladby ${i+1}"><button class="play" data-t="${t.start}" aria-label="Prehrať prechod">▶</button>`:fmt(t.start)}</td><td class="t">${ok?fmt(t.end):''}</td></tr>`).join('');
   $('xml').textContent=xmlText||'Zadaj celkový čas mixu.';
+  draw();
 }
+function draw(){
+  const s=$('nov');if(!ana||$('fig').hidden)return;
+  const W=s.clientWidth,H=s.clientHeight,sc=ana.score,dur=sc.length*ana.hop,step=Math.max(1,Math.floor(sc.length/W));
+  let p='';for(let i=0;i<sc.length;i+=step){let m=0;for(let k=i;k<i+step&&k<sc.length;k++)m=Math.max(m,sc[k]);p+=`${(i*ana.hop/dur*W).toFixed(1)},${(H-6-m*(H-22)).toFixed(1)} `}
+  const show=bounds&&mode()==='audio'?bounds.slice(1,-1):[];
+  s.innerHTML=`<polyline points="${p}" fill="none" stroke="currentColor" stroke-opacity=".45" stroke-width="1.2"/>`+show.map((b,i)=>{const x=(b/dur*W).toFixed(1);return`<line x1="${x}" x2="${x}" y1="14" y2="${H}" stroke="#e0c800" stroke-width="2"/><text x="${x}" y="11" font-size="10" text-anchor="middle" fill="currentColor">${i+2}</text>`}).join('');
+}
+const mode=()=>document.querySelector('input[name=mode]:checked').value;
 function say(t,err){$('msg').textContent=t;$('msg').className='msg'+(err?' err':'')}
 
 $('file').addEventListener('change',async e=>{
@@ -217,6 +296,38 @@ $('paste').addEventListener('input',()=>{
   render();
 });
 $('total').addEventListener('input',render);
+
+$('audio').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  $('aname').textContent=f.name;$('adrop').classList.add('has');
+  const pl=$('player');try{URL.revokeObjectURL(pl.src)}catch(_){}pl.src=URL.createObjectURL(f);pl.hidden=false;
+  ana=null;bounds=null;say('Načítavam audio… (pri dlhom mixe to môže trvať aj minútu)');
+  await new Promise(r=>setTimeout(r,50));
+  try{
+    const sr=11025,ctx=new OfflineAudioContext(1,sr,sr),buf=await ctx.decodeAudioData(await f.arrayBuffer());
+    say('Hľadám prechody medzi skladbami…');await new Promise(r=>setTimeout(r,30));
+    let x=buf.getChannelData(0);
+    if(buf.numberOfChannels>1){const m=new Float32Array(x.length);for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<m.length;i++)m[i]+=d[i]/buf.numberOfChannels}x=m}
+    ana=analyze(x,buf.sampleRate);
+    $('total').value=fmt(Math.round(buf.duration));
+    $('fig').hidden=false;$('modeRow').hidden=false;
+    say(tracks.length?'Hotovo. Skontroluj prechody v tabuľke.':'Audio načítané, teraz pridaj playlist.');
+  }catch(err){say('Audio sa nepodarilo načítať ('+(err.message||err)+'). Skús mp3 alebo m4a.',true)}
+  render();
+});
+document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',render));
+$('rows').addEventListener('change',e=>{
+  const t=e.target;if(!t.classList.contains('tin'))return;
+  const i=+t.dataset.i,v=parseTimeSec(t.value);
+  if(v==null||v<=bounds[i-1]||v>=bounds[i+1]){say(`Začiatok skladby ${i+1} musí byť medzi ${fmt(bounds[i-1])} a ${fmt(bounds[i+1])}.`,true);return render()}
+  bounds[i]=v;say('');render();
+});
+$('rows').addEventListener('click',e=>{
+  const b=e.target.closest('.play');if(!b)return;
+  const pl=$('player');pl.currentTime=Math.max(0,+b.dataset.t-8);pl.play().catch(()=>{});
+});
+function parseTimeSec(s){s=String(s).trim();return /^\d+$/.test(s)?+s:parseTime(s)}
+new ResizeObserver(draw).observe($('fig'));
 
 // zip (store) fallback for hosts that refuse .xml downloads
 function crc32(b){let c,crc=-1;for(let i=0;i<b.length;i++){c=(crc^b[i])&255;for(let k=0;k<8;k++)c=c&1?(c>>>1)^0xEDB88320:c>>>1;crc=(crc>>>8)^c}return(crc^-1)>>>0}

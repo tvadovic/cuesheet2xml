@@ -8,4 +8,4 @@ Webová aplikácia, ktorá z playlistu (Excel .xlsx, CSV alebo tabuľka skopíro
 2. Zadaj celkový čas mixu (mm:ss alebo h:mm:ss).
 3. Stiahni XML.
 
-Čas sa delí rovnomerne medzi skladby; posledná končí presne na celkovom čase. Všetko beží v prehliadači, nič sa nikam neposiela.
+Čas sa delí rovnomerne medzi skladby, alebo – ak nahráš audio mixu – sa skutočné začiatky skladieb nájdu podľa zmien zvuku (dajú sa ručne opraviť a vypočuť tlačidlom ▶). Všetko beží v prehliadači, nič sa nikam neposiela.
