@@ -70,6 +70,8 @@ audio{width:100%;margin-top:10px}
   <label for="total">2. Celkový čas mixu</label>
   <div class="row"><input type="text" id="total" inputmode="decimal" placeholder="napr. 50:48 alebo 1:00:00" autocomplete="off"></div>
   <div class="hint" id="totalHint">Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.</div>
+  <div class="row" style="margin-top:12px"><label for="offset" style="margin:0;flex:0 0 auto">Začiatočný offset</label><input type="text" id="offset" inputmode="decimal" placeholder="0:00" autocomplete="off" style="flex:0 1 120px"></div>
+  <div class="hint" id="offHint">Nepovinné. Pripočíta sa ku všetkým časom v XML (mm:ss alebo sekundy).</div>
   <div class="hint" style="margin:14px 0 6px"><b>Nepovinné:</b> nahraj audio mixu a skutočné dĺžky skladieb sa nájdu podľa prechodov.</div>
   <div class="row"><input type="text" id="alink" placeholder="Link na mix (Google Drive alebo .mp3/.m4a)" autocomplete="off" inputmode="url"><button class="btn" id="aload">Načítať</button></div>
   <div class="hint" style="margin:8px 0 6px">…alebo vyber súbor:</div>
@@ -187,11 +189,11 @@ function parseTime(s){
 }
 const fmt=sec=>{const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-function buildXml(list,total,bounds){
+function buildXml(list,total,bounds,off=0){
   const n=list.length,b=bounds&&bounds.length===n+1?i=>bounds[i]:i=>Math.round(i*total/n);
   let x='<?xml version="1.0" encoding="UTF-8"?>\n<METADATA>\n<VERSION>a01</VERSION>\n';
   list.forEach((t,i)=>{t.start=b(i);t.end=b(i+1);
-    const f=[['Class','MUS_FM'],['Artist',t.artist],['Name',t.name],['Writers',t.writers],['CopyrightP',t.label],['YearP',t.year],['SK_IsMusic',t.isMusic],['SK_IsText',t.isText],['SKAuthor',t.skAuthor],['StartPos',t.start],['EndPos',t.end],['CopyrightC',t.label],['YearC',t.year]];
+    const f=[['Class','MUS_FM'],['Artist',t.artist],['Name',t.name],['Writers',t.writers],['CopyrightP',t.label],['YearP',t.year],['SK_IsMusic',t.isMusic],['SK_IsText',t.isText],['SKAuthor',t.skAuthor],['StartPos',t.start+off],['EndPos',t.end+off],['CopyrightC',t.label],['YearC',t.year]];
     x+='  <work>\n'+f.map(([k,v])=>`    <${k}>${esc(v)}</${k}>\n`).join('')+'  </work>\n'});
   return x+'</METADATA>';
 }
@@ -259,11 +261,12 @@ function render(){
   if(!tracks.length)return;
   if(ana&&ok&&(!bounds||bounds.length!==tracks.length+1||bounds[bounds.length-1]!==total))bounds=pickBounds(ana.score,ana.hop,tracks.length,total);
   const useA=!!(ana&&ok&&mode()==='audio'&&bounds);
-  xmlText=ok?buildXml(tracks,total,useA?bounds:null):'';
+  const off=offset();
+  xmlText=ok?buildXml(tracks,total,useA?bounds:null,off):'';
   const per=ok?total/tracks.length:0;
   $('bar').innerHTML=tracks.map(t=>`<span style="flex-grow:${ok?Math.max(1,t.end-t.start):1}"></span>`).join('');
   $('barInfo').textContent=`${tracks.length} skladieb`+(ok?(useA?' · časy podľa audia, skontroluj prechody tlačidlom ▶':` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`):'');
-  $('rows').innerHTML=tracks.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${!ok?'':useA&&i>0?`<input class="tin" data-i="${i}" value="${fmt(t.start)}" inputmode="decimal" aria-label="Začiatok skladby ${i+1}"><button class="play" data-t="${t.start}" aria-label="Prehrať prechod">▶</button>`:fmt(t.start)}</td><td class="t">${ok?fmt(t.end):''}</td></tr>`).join('');
+  $('rows').innerHTML=tracks.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${!ok?'':useA&&i>0?`<input class="tin" data-i="${i}" value="${fmt(t.start+off)}" inputmode="decimal" aria-label="Začiatok skladby ${i+1}"><button class="play" data-t="${t.start}" aria-label="Prehrať prechod">▶</button>`:fmt(t.start+off)}</td><td class="t">${ok?fmt(t.end+off):''}</td></tr>`).join('');
   $('xml').textContent=xmlText||'Zadaj celkový čas mixu.';
   draw();
 }
@@ -298,6 +301,9 @@ $('paste').addEventListener('input',()=>{
   render();
 });
 $('total').addEventListener('input',render);
+function offset(){const v=$('offset').value.trim();if(!v)return 0;const n=parseTimeSec(v);return n==null?0:n}
+$('offset').addEventListener('input',()=>{const v=$('offset').value.trim(),n=v?parseTimeSec(v):0;
+  $('offHint').textContent=!v?'Nepovinné. Pripočíta sa ku všetkým časom v XML (mm:ss alebo sekundy).':n==null?'Neviem prečítať offset. Skús napr. 0:30 alebo 30':`= +${n} s ku všetkým časom v XML`;render()});
 
 $('audio').addEventListener('change',e=>{
   const f=e.target.files[0];if(!f)return;
@@ -350,8 +356,8 @@ async function loadAudio(f){
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',render));
 $('rows').addEventListener('change',e=>{
   const t=e.target;if(!t.classList.contains('tin'))return;
-  const i=+t.dataset.i,v=parseTimeSec(t.value);
-  if(v==null||v<=bounds[i-1]||v>=bounds[i+1]){say(`Začiatok skladby ${i+1} musí byť medzi ${fmt(bounds[i-1])} a ${fmt(bounds[i+1])}.`,true);return render()}
+  const i=+t.dataset.i,o=offset(),pv=parseTimeSec(t.value),v=pv==null?null:pv-o;
+  if(v==null||v<=bounds[i-1]||v>=bounds[i+1]){say(`Začiatok skladby ${i+1} musí byť medzi ${fmt(bounds[i-1]+o)} a ${fmt(bounds[i+1]+o)}.`,true);return render()}
   bounds[i]=v;say('');render();
 });
 $('rows').addEventListener('click',e=>{
