@@ -15,6 +15,7 @@
 :root{color-scheme:light dark;--bg:light-dark(#fff,#1a1a19);--ink:light-dark(#111,#eee);--mute:light-dark(#666,#9a9a96);--plane:light-dark(#ececea,#262625);--line:light-dark(#d8d8d4,#3a3a38);--acc:#ffe600;--accInk:#111;--err:light-dark(#b00020,#ff8a80)}
 :root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;min-width:0}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Hanken Grotesk",system-ui,sans-serif;overflow-x:clip}
 .wrap{max-width:760px;margin:0 auto;padding:clamp(20px,4vw,48px) max(5vw,16px) 64px}
 h1{font-size:clamp(30px,6vw,44px);line-height:1.05;font-weight:500;margin:0 0 6px;text-wrap:balance}
@@ -68,7 +69,7 @@ tr.div td{padding:14px 6px 6px;font-weight:700;border-bottom:2px solid var(--ink
 
 <div class="step">
   <label for="file">1. Excel s playlistom</label>
-  <div class="hint" style="margin:0 0 10px">Stĺpce v tomto poradí (hlavička nie je potrebná): <b>Interpret · Skladba · Autori hudby · Vydavateľ · Rok</b>, prípadne ešte SK_IsMusic · SK_IsText · SKAuthor.</div>
+  <div class="hint" style="margin:0 0 10px">Stĺpce v tomto poradí (hlavička nie je potrebná): <b>Interpret · Skladba · Autori hudby · Vydavateľ · Rok</b>, prípadne ešte SK_IsMusic · SK_IsText · SKAuthor. Ak má tabuľka stĺpec so skutočnou dĺžkou skladby (mm:ss), časy sa vypočítajú z neho.</div>
   <div class="drop" id="drop"><input type="file" id="file" accept=".xlsx,.csv,.tsv,.txt"><span id="fname">Ťukni a vyber .xlsx (alebo .csv)</span></div>
   <div class="hint" style="margin:12px 0 6px">…alebo v Google Sheets označ bunky so skladbami, skopíruj a vlož sem:</div>
   <textarea id="paste" rows="4" placeholder="Interpret	Skladba	Autori hudby	Vydavateľ	Rok"></textarea>
@@ -90,7 +91,8 @@ tr.div td{padding:14px 6px 6px;font-weight:700;border-bottom:2px solid var(--ink
   <div class="hint" style="margin:8px 0 6px">…alebo vyber súbor:</div>
   <div class="drop" id="adrop"><input type="file" id="audio" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg"><span id="aname">Ťukni a vyber audio mixu</span></div>
   <div class="row" id="modeRow" hidden style="margin-top:10px">
-    <label class="opt"><input type="radio" name="mode" value="audio" checked> Časy z audia</label>
+    <label class="opt" id="optLen"><input type="radio" name="mode" value="len"> Podľa dĺžok</label>
+    <label class="opt" id="optAudio"><input type="radio" name="mode" value="audio" checked> Časy z audia</label>
     <label class="opt"><input type="radio" name="mode" value="even"> Rovnomerne</label>
   </div>
   <div class="fig" id="fig" hidden><svg id="nov" aria-label="Zmeny zvuku v mixe"></svg></div>
@@ -169,7 +171,7 @@ async function readXlsx(buf){
       const at=cm[1],body=cm[2]||'',r=(at.match(/\br="([A-Z]+)\d+"/)||[])[1],t=(at.match(/\bt="(\w+)"/)||[])[1];
       const v=(body.match(/<v>([\s\S]*?)<\/v>/)||[])[1];
       let val='';
-      if(t==='s')val=shared[+v]??'';else if(t==='inlineStr')val=textOf(body);else if(v!=null)val=t==='str'||t==='b'?unesc(v):(isNaN(+v)?unesc(v):+v);
+      if(t==='s')val=shared[+v]??'';else if(t==='inlineStr')val=textOf(body);else if(v!=null)val=t==='b'?(v==='1'?'TRUE':'FALSE'):t==='str'?unesc(v):(isNaN(+v)?unesc(v):+v);
       row[r?colIdx(r):row.length]=val;
     }
     rows.push(row);
@@ -191,8 +193,8 @@ function readCsv(txt){
 
 // ---------- Mapping ----------
 const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
-const FIELDS=[['artist','Interpret'],['name','Skladba'],['writers','Autori hudby'],['label','Vydavateľ'],['year','Rok'],['isMusic','SK_IsMusic'],['isText','SK_IsText'],['skAuthor','SKAuthor']];
-const SYN={artist:['artist','artists','interpret','interpreti','umelec','vykonavatel','performer','kapela','band'],name:['trackname','nazovskladby','nazov','skladba','track','title','song','piesen','titul','name'],writers:['autorihudby','autorhudby','skladatel','skladatelia','composer','composers','writer','writers','autori','autor','hudba'],label:['vydavatel','vydavatelstvo','label','publisher','copyright','copyrightp'],year:['rokvydania','rok','year','yearp'],isMusic:['skismusic','ismusic'],isText:['skistext','istext'],skAuthor:['skauthor']};
+const FIELDS=[['artist','Interpret'],['name','Skladba'],['writers','Autori hudby'],['label','Vydavateľ'],['year','Rok'],['isMusic','SK_IsMusic'],['isText','SK_IsText'],['skAuthor','SKAuthor'],['len','Dĺžka skladby']];
+const SYN={artist:['artist','artists','interpret','interpreti','umelec','vykonavatel','performer','kapela','band'],name:['trackname','nazovskladby','nazov','skladba','track','title','song','piesen','titul','name'],writers:['autorihudby','autorhudby','skladatel','skladatelia','composer','composers','writer','writers','autori','autor','hudba'],label:['vydavatel','vydavatelstvo','label','publisher','copyright','copyrightp'],year:['rokvydania','rok','year','yearp'],isMusic:['skismusic','ismusic'],isText:['skistext','istext'],skAuthor:['skauthor'],len:['skutocnadlzkaskladby','dlzkaskladby','dlzka','length','duration','trvanie','stopaz']};
 const cell=v=>v==null?'':String(v).trim();
 let saved={};try{saved=JSON.parse(localStorage.getItem('colmap')||'{}')}catch(_){}
 function guessField(h,taken){
@@ -209,14 +211,29 @@ function detect(rows){
     const width=Math.max(0,...rows.map(r=>r?r.length:0)),map={};
   const head=Array.from({length:width},(_,i)=>hi>=0&&cell(rows[hi][i])?cell(rows[hi][i]):'Stĺpec '+String.fromCharCode(65+i%26));
   if(best>0){const taken=new Set();head.forEach((h,i)=>{const f=guessField(norm(h),taken);if(f){taken.add(f);map[f]=i}})}
-  else FIELDS.forEach(([k],i)=>{if(i<width)map[k]=i});
+  else{
+    // no header: fixed order; a column of mm:ss values is the track length
+    const data=rows.filter(r=>r&&r.some(c=>cell(c)));let lc=-1;
+    for(let c=0;c<width&&lc<0;c++){const v=data.map(r=>r[c]).filter(x=>cell(x));if(v.length&&v.filter(isLen).length>=v.length*0.8)lc=c}
+    const cols=[...Array(width).keys()].filter(c=>c!==lc);
+    FIELDS.filter(([k])=>k!=='len').forEach(([k],i)=>{if(i<cols.length)map[k]=cols[i]});map.len=lc;
+  }
   for(const[k]of FIELDS)if(map[k]==null)map[k]=-1;
   return{rows,hi,head,map,recognized:best>0};
 }
 function toTracks(rows,tb){
   tb=tb||detect(rows);
   const g=(r,k)=>tb.map[k]<0?'':cell(r[tb.map[k]]);
-  return rows.slice(tb.hi+1).filter(r=>r&&(g(r,'artist')||g(r,'name'))).map(r=>({artist:g(r,'artist'),name:g(r,'name'),writers:g(r,'writers'),label:g(r,'label'),year:g(r,'year').replace(/\.0+$/,''),isMusic:g(r,'isMusic'),isText:g(r,'isText'),skAuthor:g(r,'skAuthor')}));
+  return rows.slice(tb.hi+1).filter(r=>r&&(g(r,'artist')||g(r,'name'))).map(r=>({artist:g(r,'artist'),name:g(r,'name'),writers:g(r,'writers'),label:g(r,'label'),year:g(r,'year').replace(/\.0+$/,''),isMusic:g(r,'isMusic'),isText:g(r,'isText'),skAuthor:g(r,'skAuthor'),len:tb.map.len<0?0:parseLen(r[tb.map.len])}));
+}
+const isLen=v=>typeof v==='number'?v>0&&v<1:/^\d{1,3}:\d{2}(:\d{2})?$/.test(cell(v));
+// track length in seconds: mm:ss text, or an Excel time (fraction of a day); 2:05 stored as h:mm is read as 2 min 5 s
+function parseLen(v){
+  let sec=0;
+  if(typeof v==='number')sec=v<1?Math.round(v*86400):Math.round(v);
+  else{const p=cell(v).split(':');if(p.length<2||p.some(x=>!/^\d+$/.test(x)))return 0;sec=p.length===2?+p[0]*60+ +p[1]:+p[0]*3600+ +p[1]*60+ +p[2]}
+  if(sec>=3600&&sec%60===0)sec/=60;
+  return sec;
 }
 function parseTime(s){
   s=String(s).trim().replace(',','.');if(!s)return null;
@@ -302,8 +319,11 @@ function pickBounds(score,hopS,n,total){
 
 // ---------- UI ----------
 function render(){
-  const total=parseTime($('total').value);
-  $('totalHint').textContent=$('total').value.trim()?(total?`= ${total} s (${fmt(total)})`:'Neviem prečítať čas. Skús napr. 50:48'):'Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.';
+  const haveLen=tracks.length>0&&tracks.every(t=>t.len>0),sumLen=tracks.reduce((a,t)=>a+(t.len||0),0);
+  $('optLen').hidden=!haveLen;$('optAudio').hidden=!ana;$('modeRow').hidden=!(haveLen||ana);
+  let m=mode();if((m==='len'&&!haveLen)||(m==='audio'&&!ana)){m=haveLen?'len':ana?'audio':'even';document.querySelector(`input[name=mode][value=${m}]`).checked=true}
+  const useL=haveLen&&m==='len',typed=parseTime($('total').value),total=useL?sumLen:typed;
+  $('totalHint').textContent=useL?`Použije sa súčet dĺžok skladieb: ${fmt(sumLen)}`+(typed&&typed!==sumLen?` (zadaný čas ${fmt(typed)} sa ignoruje)`:''):$('total').value.trim()?(total?`= ${total} s (${fmt(total)})`:'Neviem prečítať čas. Skús napr. 50:48'):'Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.';
   const ok=tracks.length&&total;
   $('dl').disabled=$('copy').disabled=!ok;
   $('out').hidden=!tracks.length;
@@ -311,7 +331,8 @@ function render(){
   if(ana&&ok&&(!bounds||bounds.length!==tracks.length+1||bounds[bounds.length-1]!==total))bounds=pickBounds(ana.score,ana.hop,tracks.length,total);
   const useA=!!(ana&&ok&&mode()==='audio'&&bounds);
   const off=offset(),S=timeField('split',null);
-  xmlText=ok?buildXml(tracks,total,useA?bounds:null,off):'';
+  let lb=null;if(useL){lb=[0];for(const t of tracks)lb.push(lb[lb.length-1]+t.len)}
+  xmlText=ok?buildXml(tracks,total,useA?bounds:useL?lb:null,off):'';
   const doSplit=!!(ok&&S!=null&&S>0&&S<total);
   let items=tracks.map(t=>({t,s:t.start+off,e:t.end+off,part:1}));
   if(doSplit){const[p1,p2,Z]=splitParts(tracks,S,off);zeroB=Z;items=p1.concat(p2);xmlText=writeXml(p1);xmlText2=writeXml(p2);
@@ -321,7 +342,7 @@ function render(){
   $('row2').hidden=$('xml2').hidden=!doSplit;$('dl').textContent=doSplit?'Stiahnuť 1. časť':'Stiahnuť XML';$('copy').textContent=doSplit?'Kopírovať 1. časť':'Kopírovať';
   const per=ok?total/tracks.length:0;
   $('bar').innerHTML=tracks.map(t=>`<span style="flex-grow:${ok?Math.max(1,t.end-t.start):1}"></span>`).join('');
-  $('barInfo').textContent=`${tracks.length} skladieb`+(ok?(useA?' · časy podľa audia, skontroluj prechody tlačidlom ▶':` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`):'');
+  $('barInfo').textContent=`${tracks.length} skladieb`+(ok?(useA?' · časy podľa audia, skontroluj prechody tlačidlom ▶':useL?` · časy podľa dĺžok skladieb, spolu ${fmt(sumLen)}`:` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`):'');
   $('rows').innerHTML=tracks.map((t,i)=>{const it=items[i];
     const div=doSplit&&(i===0||it.part!==items[i-1].part)?`<tr class="div"><td colspan="5">${it.part}. časť</td></tr>`:'';
     return div+`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${!ok?'':useA&&i>0?`<input class="tin" data-i="${i}" value="${fmt(it.s)}" inputmode="decimal" aria-label="Začiatok skladby ${i+1}"><button class="play" data-t="${t.start}" aria-label="Prehrať prechod">▶</button>`:fmt(it.s)}</td><td class="t">${ok?fmt(it.e):''}</td></tr>`}).join('');
@@ -358,7 +379,7 @@ $('paste').addEventListener('input',()=>{
 });
 $('total').addEventListener('input',render);
 let tbl=null;
-function loadTable(rows){tbl=detect(rows);applyMap(true)}
+function loadTable(rows){tbl=detect(rows);applyMap(true);if(tracks.length&&tracks.every(t=>t.len>0))document.querySelector('input[name=mode][value=len]').checked=true}
 function applyMap(first){
   tracks=toTracks(tbl.rows,tbl);
   const miss=tbl.map.artist<0&&tbl.map.name<0;
@@ -433,7 +454,7 @@ async function loadAudio(f){
     if(buf.numberOfChannels>1){const m=new Float32Array(x.length);for(let c=0;c<buf.numberOfChannels;c++){const d=buf.getChannelData(c);for(let i=0;i<m.length;i++)m[i]+=d[i]/buf.numberOfChannels}x=m}
     ana=analyze(x,buf.sampleRate);
     $('total').value=fmt(Math.round(buf.duration));
-    $('fig').hidden=false;$('modeRow').hidden=false;
+    $('fig').hidden=false;document.querySelector('input[name=mode][value=audio]').checked=true;
     say(tracks.length?'Hotovo. Skontroluj prechody v tabuľke.':'Audio načítané, teraz pridaj playlist.');
   }catch(err){say('Audio sa nepodarilo načítať ('+(err.message||err)+'). Skús mp3 alebo m4a.',true)}
   render();
