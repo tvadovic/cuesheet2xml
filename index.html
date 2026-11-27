@@ -46,6 +46,10 @@ details{margin-top:14px}summary{cursor:pointer;font-weight:700;min-height:44px;d
 @media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px;border-bottom:1px solid var(--line)}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:6em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:5.5em;margin-inline-start:-6em;color:var(--mute)}.stack td:empty{display:none}}
 .fig{position:relative;height:120px;margin-top:12px;background:var(--bg);border-radius:10px}.fig>svg{position:absolute;inset:0;width:100%;height:100%}
 audio{width:100%;margin-top:10px}
+.step label.lbl{margin:0;flex:0 0 9.5em;font-weight:500}
+input.short{flex:0 1 130px}
+tr.div td{padding:14px 6px 6px;font-weight:700;border-bottom:2px solid var(--ink)}
+@media(max-width:600px){.stack tr.div td{padding-inline-start:0}.stack tr.div td::before{content:none}}
 .opt{display:flex;align-items:center;gap:6px;min-height:44px;font-weight:500!important;margin:0!important}
 .opt input{width:20px;height:20px;accent-color:var(--ink)}
 .tin{width:5.2em;font:inherit;font-size:16px;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
@@ -70,7 +74,7 @@ audio{width:100%;margin-top:10px}
   <label for="total">2. Celkový čas mixu</label>
   <div class="row"><input type="text" id="total" inputmode="decimal" placeholder="napr. 50:48 alebo 1:00:00" autocomplete="off"></div>
   <div class="hint" id="totalHint">Formát mm:ss alebo h:mm:ss. Samotné číslo sa berie ako minúty.</div>
-  <div class="row" style="margin-top:12px"><label for="offset" style="margin:0;flex:0 0 auto">Začiatočný offset</label><input type="text" id="offset" inputmode="decimal" placeholder="0:00" autocomplete="off" style="flex:0 1 120px"></div>
+  <div class="row" style="margin-top:12px"><label for="offset" class="lbl">Začiatočný offset</label><input type="text" id="offset" inputmode="decimal" placeholder="0:00" autocomplete="off" class="short"></div>
   <div class="hint" id="offHint">Nepovinné. Pripočíta sa ku všetkým časom v XML (mm:ss alebo sekundy).</div>
   <div class="hint" style="margin:14px 0 6px"><b>Nepovinné:</b> nahraj audio mixu a skutočné dĺžky skladieb sa nájdu podľa prechodov.</div>
   <div class="row"><input type="text" id="alink" placeholder="Link na mix (Google Drive alebo .mp3/.m4a)" autocomplete="off" inputmode="url"><button class="btn" id="aload">Načítať</button></div>
@@ -85,25 +89,33 @@ audio{width:100%;margin-top:10px}
 </div>
 
 <div class="step">
-  <label for="name">3. Názov súboru</label>
+  <label for="split">3. Rozdelenie na dve časti <span style="font-weight:400;color:var(--mute)">(nepovinné)</span></label>
+  <div class="row"><label for="split" class="lbl">Koniec 1. časti</label><input type="text" id="split" inputmode="decimal" placeholder="napr. 25:00" autocomplete="off" class="short"></div>
+  <div class="row" style="margin-top:10px"><label for="off2" class="lbl">Offset 2. časti</label><input type="text" id="off2" inputmode="decimal" placeholder="0:00" autocomplete="off" class="short"></div>
+  <div class="hint" id="splitHint">Čas v mixe, kde končí 1. časť. Dostaneš dve XML; 2. časť má časy od nuly plus jej offset. Skladba na hranici ide tam, kde hrá dlhšie.</div>
+</div>
+
+<div class="step">
+  <label for="name">4. Názov súboru</label>
   <div class="row"><input type="text" id="name" placeholder="napr. 1122pomala" autocomplete="off"><span>.xml</span></div>
 </div>
 
 <div class="row"><button class="btn main" id="dl" disabled>Stiahnuť XML</button><button class="btn" id="copy" disabled>Kopírovať</button></div>
+<div class="row" id="row2" hidden style="margin-top:10px"><button class="btn main" id="dl2">Stiahnuť 2. časť</button><button class="btn" id="copy2">Kopírovať 2. časť</button></div>
 <p class="msg" id="msg" role="status"></p>
 
 <div id="out" hidden>
   <div class="bar" id="bar"></div>
   <div class="hint" id="barInfo"></div>
   <table class="stack"><thead><tr><th>#</th><th>Interpret</th><th>Skladba</th><th>Začiatok</th><th>Koniec</th></tr></thead><tbody id="rows"></tbody></table>
-  <details><summary>Náhľad XML</summary><pre id="xml"></pre></details>
+  <details><summary>Náhľad XML</summary><pre id="xml"></pre><pre id="xml2" hidden></pre></details>
 </div>
 </div>
 
 <script>
 {
 const $=id=>document.getElementById(id);
-let tracks=[],xmlText='',srcName='',ana=null,bounds=null;
+let tracks=[],xmlText='',xmlText2='',srcName='',ana=null,bounds=null,partOf=[];
 
 // ---------- XLSX reading (zip + XML, no libraries) ----------
 const u16=(b,o)=>b[o]|b[o+1]<<8, u32=(b,o)=>(b[o]|b[o+1]<<8|b[o+2]<<16|b[o+3]<<24)>>>0;
@@ -189,13 +201,27 @@ function parseTime(s){
 }
 const fmt=sec=>{const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(s).padStart(2,'0')};
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-function buildXml(list,total,bounds,off=0){
-  const n=list.length,b=bounds&&bounds.length===n+1?i=>bounds[i]:i=>Math.round(i*total/n);
+function writeXml(items){
   let x='<?xml version="1.0" encoding="UTF-8"?>\n<METADATA>\n<VERSION>a01</VERSION>\n';
-  list.forEach((t,i)=>{t.start=b(i);t.end=b(i+1);
-    const f=[['Class','MUS_FM'],['Artist',t.artist],['Name',t.name],['Writers',t.writers],['CopyrightP',t.label],['YearP',t.year],['SK_IsMusic',t.isMusic],['SK_IsText',t.isText],['SKAuthor',t.skAuthor],['StartPos',t.start+off],['EndPos',t.end+off],['CopyrightC',t.label],['YearC',t.year]];
+  items.forEach(({t,s,e})=>{
+    const f=[['Class','MUS_FM'],['Artist',t.artist],['Name',t.name],['Writers',t.writers],['CopyrightP',t.label],['YearP',t.year],['SK_IsMusic',t.isMusic],['SK_IsText',t.isText],['SKAuthor',t.skAuthor],['StartPos',s],['EndPos',e],['CopyrightC',t.label],['YearC',t.year]];
     x+='  <work>\n'+f.map(([k,v])=>`    <${k}>${esc(v)}</${k}>\n`).join('')+'  </work>\n'});
   return x+'</METADATA>';
+}
+// split at S (mix seconds): each track goes to the part where it plays longer; times clipped to that part
+function splitParts(list,S,off1,off2){
+  const p1=[],p2=[];
+  for(const t of list){
+    const a=Math.max(0,Math.min(t.end,S)-t.start),b=Math.max(0,t.end-Math.max(t.start,S));
+    if(a>=b)p1.push({t,s:Math.min(t.start,S)+off1,e:Math.min(t.end,S)+off1,part:1});
+    else p2.push({t,s:Math.max(0,t.start-S)+off2,e:t.end-S+off2,part:2});
+  }
+  return[p1,p2];
+}
+function buildXml(list,total,bounds,off=0){
+  const n=list.length,b=bounds&&bounds.length===n+1?i=>bounds[i]:i=>Math.round(i*total/n);
+  list.forEach((t,i)=>{t.start=b(i);t.end=b(i+1)});
+  return writeXml(list.map(t=>({t,s:t.start+off,e:t.end+off})));
 }
 
 // ---------- Audio: find track changes ----------
@@ -261,13 +287,22 @@ function render(){
   if(!tracks.length)return;
   if(ana&&ok&&(!bounds||bounds.length!==tracks.length+1||bounds[bounds.length-1]!==total))bounds=pickBounds(ana.score,ana.hop,tracks.length,total);
   const useA=!!(ana&&ok&&mode()==='audio'&&bounds);
-  const off=offset();
+  const off=offset(),o2=timeField('off2'),S=timeField('split',null);
   xmlText=ok?buildXml(tracks,total,useA?bounds:null,off):'';
+  const doSplit=!!(ok&&S!=null&&S>0&&S<total);
+  let items=tracks.map(t=>({t,s:t.start+off,e:t.end+off,part:1}));
+  if(doSplit){const[p1,p2]=splitParts(tracks,S,off,o2);items=p1.concat(p2);xmlText=writeXml(p1);xmlText2=writeXml(p2);
+    $('splitHint').textContent=`1. časť: ${p1.length} skladieb, 2. časť: ${p2.length} skladieb.`}
+  else{xmlText2='';$('splitHint').textContent=$('split').value.trim()&&ok?`Koniec 1. časti musí byť medzi 0:00 a ${fmt(total)}.`:'Čas v mixe, kde končí 1. časť. Dostaneš dve XML; 2. časť má časy od nuly plus jej offset. Skladba na hranici ide tam, kde hrá dlhšie.'}
+  partOf=items.map(x=>x.part);
+  $('row2').hidden=$('xml2').hidden=!doSplit;$('dl').textContent=doSplit?'Stiahnuť 1. časť':'Stiahnuť XML';$('copy').textContent=doSplit?'Kopírovať 1. časť':'Kopírovať';
   const per=ok?total/tracks.length:0;
   $('bar').innerHTML=tracks.map(t=>`<span style="flex-grow:${ok?Math.max(1,t.end-t.start):1}"></span>`).join('');
   $('barInfo').textContent=`${tracks.length} skladieb`+(ok?(useA?' · časy podľa audia, skontroluj prechody tlačidlom ▶':` · ${per%1?'cca ':''}${fmt(Math.round(per))} na skladbu`):'');
-  $('rows').innerHTML=tracks.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${!ok?'':useA&&i>0?`<input class="tin" data-i="${i}" value="${fmt(t.start+off)}" inputmode="decimal" aria-label="Začiatok skladby ${i+1}"><button class="play" data-t="${t.start}" aria-label="Prehrať prechod">▶</button>`:fmt(t.start+off)}</td><td class="t">${ok?fmt(t.end+off):''}</td></tr>`).join('');
-  $('xml').textContent=xmlText||'Zadaj celkový čas mixu.';
+  $('rows').innerHTML=tracks.map((t,i)=>{const it=items[i];
+    const div=doSplit&&(i===0||it.part!==items[i-1].part)?`<tr class="div"><td colspan="5">${it.part}. časť</td></tr>`:'';
+    return div+`<tr><td>${i+1}</td><td>${esc(t.artist)}</td><td>${esc(t.name)}</td><td class="t">${!ok?'':useA&&i>0?`<input class="tin" data-i="${i}" value="${fmt(it.s)}" inputmode="decimal" aria-label="Začiatok skladby ${i+1}"><button class="play" data-t="${t.start}" aria-label="Prehrať prechod">▶</button>`:fmt(it.s)}</td><td class="t">${ok?fmt(it.e):''}</td></tr>`}).join('');
+  $('xml').textContent=xmlText||'Zadaj celkový čas mixu.';$('xml2').textContent=xmlText2;
   draw();
 }
 function draw(){
@@ -301,7 +336,9 @@ $('paste').addEventListener('input',()=>{
   render();
 });
 $('total').addEventListener('input',render);
-function offset(){const v=$('offset').value.trim();if(!v)return 0;const n=parseTimeSec(v);return n==null?0:n}
+function timeField(id,dflt=0){const v=$(id).value.trim();if(!v)return dflt;const n=parseTimeSec(v);return n==null?dflt:n}
+const offset=()=>timeField('offset');
+$('split').addEventListener('input',render);$('off2').addEventListener('input',render);
 $('offset').addEventListener('input',()=>{const v=$('offset').value.trim(),n=v?parseTimeSec(v):0;
   $('offHint').textContent=!v?'Nepovinné. Pripočíta sa ku všetkým časom v XML (mm:ss alebo sekundy).':n==null?'Neviem prečítať offset. Skús napr. 0:30 alebo 30':`= +${n} s ku všetkým časom v XML`;render()});
 
@@ -356,8 +393,8 @@ async function loadAudio(f){
 document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',render));
 $('rows').addEventListener('change',e=>{
   const t=e.target;if(!t.classList.contains('tin'))return;
-  const i=+t.dataset.i,o=offset(),pv=parseTimeSec(t.value),v=pv==null?null:pv-o;
-  if(v==null||v<=bounds[i-1]||v>=bounds[i+1]){say(`Začiatok skladby ${i+1} musí byť medzi ${fmt(bounds[i-1]+o)} a ${fmt(bounds[i+1]+o)}.`,true);return render()}
+  const i=+t.dataset.i,pv=parseTimeSec(t.value),S=timeField('split',null),v=pv==null?null:partOf[i]===2?pv-timeField('off2')+S:pv-offset();
+  if(v==null||v<=bounds[i-1]||v>=bounds[i+1]){say(`Začiatok skladby ${i+1} musí byť medzi koncom predchádzajúcej a nasledujúcej skladby.`,true);return render()}
   bounds[i]=v;say('');render();
 });
 $('rows').addEventListener('click',e=>{
@@ -379,8 +416,10 @@ function zip1(name,data){
 let dlCap=null;
 try{window.claude&&claude.use&&claude.use('downloads').then(d=>{dlCap=d}).catch(()=>{})}catch(e){}
 
-$('dl').addEventListener('click',async()=>{
-  const fn=($('name').value.trim()||srcName||'cuesheet').replace(/\.xml$/i,'')+'.xml';
+const base=()=>($('name').value.trim()||srcName||'cuesheet').replace(/\.xml$/i,'');
+$('dl').addEventListener('click',()=>saveXml(base()+(xmlText2?'_1':'')+'.xml',xmlText));
+$('dl2').addEventListener('click',()=>saveXml(base()+'_2.xml',xmlText2));
+async function saveXml(fn,xmlText){
   if(dlCap){
     try{await dlCap.save({filename:fn,data:xmlText});say('Uložené: '+fn);return}
     catch(err){
@@ -395,10 +434,10 @@ $('dl').addEventListener('click',async()=>{
     const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([xmlText],{type:'application/xml'}));a.download=fn;document.body.appendChild(a);a.click();a.remove();
     say('Stiahnuté: '+fn);
   }catch(e){say('Sťahovanie tu nefunguje, použi Kopírovať.',true)}
-});
-$('copy').addEventListener('click',async()=>{
-  try{await navigator.clipboard.writeText(xmlText);say('XML skopírované do schránky.')}catch(e){say('Kopírovanie nefunguje, XML nájdeš v náhľade nižšie.',true)}
-});
+}
+async function copyXml(t){try{await navigator.clipboard.writeText(t);say('XML skopírované do schránky.')}catch(e){say('Kopírovanie nefunguje, XML nájdeš v náhľade nižšie.',true)}}
+$('copy').addEventListener('click',()=>copyXml(xmlText));
+$('copy2').addEventListener('click',()=>copyXml(xmlText2));
 render();
 }
 </script>
