@@ -48,6 +48,9 @@ details{margin-top:14px}summary{cursor:pointer;font-weight:700;min-height:44px;d
 audio{width:100%;margin-top:10px}
 .step label.lbl{margin:0;flex:0 0 9.5em;font-weight:500}
 input.short{flex:0 1 130px}
+.map{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 12px;align-items:center;margin:6px 0 4px}
+.map label{margin:0!important;font-weight:500!important}
+select{font:inherit;font-size:16px;min-height:44px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);width:100%}
 tr.div td{padding:14px 6px 6px;font-weight:700;border-bottom:2px solid var(--ink)}
 @media(max-width:600px){.stack tr.div td{padding-inline-start:0}.stack tr.div td::before{content:none}}
 .opt{display:flex;align-items:center;gap:6px;min-height:44px;font-weight:500!important;margin:0!important}
@@ -65,9 +68,15 @@ tr.div td{padding:14px 6px 6px;font-weight:700;border-bottom:2px solid var(--ink
 
 <div class="step">
   <label for="file">1. Excel s playlistom</label>
+  <div class="hint" style="margin:0 0 10px">Stĺpce v tomto poradí (hlavička nie je potrebná): <b>Interpret · Skladba · Autori hudby · Vydavateľ · Rok</b>, prípadne ešte SK_IsMusic · SK_IsText · SKAuthor.</div>
   <div class="drop" id="drop"><input type="file" id="file" accept=".xlsx,.csv,.tsv,.txt"><span id="fname">Ťukni a vyber .xlsx (alebo .csv)</span></div>
-  <div class="hint" style="margin:12px 0 6px">…alebo v Google Sheets označ bunky aj s hlavičkou, skopíruj a vlož sem:</div>
-  <textarea id="paste" rows="4" placeholder="Artist	Track Name	Autori hudby	Vydavatel	Rok …"></textarea>
+  <div class="hint" style="margin:12px 0 6px">…alebo v Google Sheets označ bunky so skladbami, skopíruj a vlož sem:</div>
+  <textarea id="paste" rows="4" placeholder="Interpret	Skladba	Autori hudby	Vydavateľ	Rok"></textarea>
+  <details id="mapBox" hidden><summary>Stĺpce</summary>
+    <label class="opt"><input type="checkbox" id="hasHead"> Prvý riadok je hlavička</label>
+    <div class="map" id="mapGrid"></div>
+    <div class="hint">Len ak stĺpce nie sú v poradí vyššie. Ak má tabuľka hlavičku so známymi názvami (Artist, Interpret, Rok…), poradie sa rozpozná samo.</div>
+  </details>
 </div>
 
 <div class="step">
@@ -182,15 +191,32 @@ function readCsv(txt){
 
 // ---------- Mapping ----------
 const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');
-const COLS={artist:['artist','interpret'],name:['trackname','nazov','skladba','track','title'],writers:['autorihudby','autori','writers','autor'],label:['vydavatel','label','copyright'],year:['rok','year'],isMusic:['skismusic'],isText:['skistext'],skAuthor:['skauthor'],len:['dlzkaskladby','dlzka','length','duration']};
+const FIELDS=[['artist','Interpret'],['name','Skladba'],['writers','Autori hudby'],['label','Vydavateľ'],['year','Rok'],['isMusic','SK_IsMusic'],['isText','SK_IsText'],['skAuthor','SKAuthor']];
+const SYN={artist:['artist','artists','interpret','interpreti','umelec','vykonavatel','performer','kapela','band'],name:['trackname','nazovskladby','nazov','skladba','track','title','song','piesen','titul','name'],writers:['autorihudby','autorhudby','skladatel','skladatelia','composer','composers','writer','writers','autori','autor','hudba'],label:['vydavatel','vydavatelstvo','label','publisher','copyright','copyrightp'],year:['rokvydania','rok','year','yearp'],isMusic:['skismusic','ismusic'],isText:['skistext','istext'],skAuthor:['skauthor']};
 const cell=v=>v==null?'':String(v).trim();
-function toTracks(rows){
-  const hi=rows.findIndex(r=>r&&r.some(c=>COLS.artist.includes(norm(c))));
-  if(hi<0)throw new Error('Nenašiel som hlavičku so stĺpcom „Artist“');
-  const head=rows[hi].map(norm),map={};
-  for(const k in COLS){let i=head.findIndex(h=>COLS[k].includes(h));if(i<0)i=head.findIndex(h=>h&&COLS[k].some(c=>h.startsWith(c)));map[k]=i}
-  const g=(r,k)=>map[k]<0?'':cell(r[map[k]]);
-  return rows.slice(hi+1).filter(r=>r&&(g(r,'artist')||g(r,'name'))).map(r=>({artist:g(r,'artist'),name:g(r,'name'),writers:g(r,'writers'),label:g(r,'label'),year:g(r,'year').replace(/\.0+$/,''),isMusic:g(r,'isMusic'),isText:g(r,'isText'),skAuthor:g(r,'skAuthor')}));
+let saved={};try{saved=JSON.parse(localStorage.getItem('colmap')||'{}')}catch(_){}
+function guessField(h,taken){
+  if(!h)return null;
+  if(saved[h]&&!taken.has(saved[h]))return saved[h];
+  for(const[k]of FIELDS)if(!taken.has(k)&&SYN[k].includes(h))return k;
+  for(const[k]of FIELDS)if(!taken.has(k)&&SYN[k].some(x=>x.length>=4&&h.includes(x)))return k;
+  return null;
+}
+// detect header row and column mapping
+function detect(rows){
+  let hi=-1,best=0;
+  for(let i=0;i<Math.min(rows.length,10);i++){const r=rows[i]||[],taken=new Set();let n=0;for(const c of r){const f=guessField(norm(c),taken);if(f){taken.add(f);n++}}if(n>best){best=n;hi=i}}
+    const width=Math.max(0,...rows.map(r=>r?r.length:0)),map={};
+  const head=Array.from({length:width},(_,i)=>hi>=0&&cell(rows[hi][i])?cell(rows[hi][i]):'Stĺpec '+String.fromCharCode(65+i%26));
+  if(best>0){const taken=new Set();head.forEach((h,i)=>{const f=guessField(norm(h),taken);if(f){taken.add(f);map[f]=i}})}
+  else FIELDS.forEach(([k],i)=>{if(i<width)map[k]=i});
+  for(const[k]of FIELDS)if(map[k]==null)map[k]=-1;
+  return{rows,hi,head,map,recognized:best>0};
+}
+function toTracks(rows,tb){
+  tb=tb||detect(rows);
+  const g=(r,k)=>tb.map[k]<0?'':cell(r[tb.map[k]]);
+  return rows.slice(tb.hi+1).filter(r=>r&&(g(r,'artist')||g(r,'name'))).map(r=>({artist:g(r,'artist'),name:g(r,'name'),writers:g(r,'writers'),label:g(r,'label'),year:g(r,'year').replace(/\.0+$/,''),isMusic:g(r,'isMusic'),isText:g(r,'isText'),skAuthor:g(r,'skAuthor')}));
 }
 function parseTime(s){
   s=String(s).trim().replace(',','.');if(!s)return null;
@@ -319,20 +345,45 @@ $('file').addEventListener('change',async e=>{
   if(!$('name').value)$('name').value=srcName;
   try{
     const rows=/\.csv$/i.test(f.name)?readCsv(await f.text()):await readXlsx(await f.arrayBuffer());
-    tracks=toTracks(rows);
-    say(tracks.length?'':'V tabuľke nie sú žiadne skladby.',!tracks.length);
-  }catch(err){tracks=[];say(err.message||'Súbor sa nepodarilo prečítať',true)}
+    loadTable(rows);
+  }catch(err){tracks=[];tbl=null;say(err.message||'Súbor sa nepodarilo prečítať',true);renderMap()}
   render();
 });
 $('paste').addEventListener('input',()=>{
   const t=$('paste').value;
-  if(!t.trim()){tracks=[];say('');return render()}
-  try{tracks=toTracks(readCsv(t));say(tracks.length?'':'Vo vloženom texte nie sú žiadne skladby.',!tracks.length)}
-  catch(err){tracks=[];say(err.message,true)}
+  if(!t.trim()){tracks=[];tbl=null;say('');renderMap();return render()}
+  loadTable(readCsv(t));
   $('fname').textContent='Ťukni a vyber .xlsx (alebo .csv)';$('drop').classList.remove('has');$('file').value='';
   render();
 });
 $('total').addEventListener('input',render);
+let tbl=null;
+function loadTable(rows){tbl=detect(rows);applyMap(true)}
+function applyMap(first){
+  tracks=toTracks(tbl.rows,tbl);
+  const miss=tbl.map.artist<0&&tbl.map.name<0;
+  say(miss?'Nerozpoznal som stĺpce, vyber ich v časti „Stĺpce“.':tracks.length?'':'V tabuľke nie sú žiadne skladby.',miss||!tracks.length);
+  if(first&&miss)$('mapBox').open=true;
+  renderMap();
+}
+function renderMap(){
+  $('mapBox').hidden=!tbl;if(!tbl)return;
+  $('hasHead').checked=tbl.hi>=0;
+  $('mapGrid').innerHTML=FIELDS.map(([k,l])=>`<label for="m_${k}">${l}</label><select id="m_${k}" data-k="${k}"><option value="-1">—</option>${tbl.head.map((h,i)=>`<option value="${i}"${tbl.map[k]===i?' selected':''}>${esc(h)}</option>`).join('')}</select>`).join('');
+}
+$('mapGrid').addEventListener('change',e=>{
+  const k=e.target.dataset.k;if(!k)return;const i=+e.target.value;
+  for(const[f]of FIELDS)if(f!==k&&tbl.map[f]===i&&i>=0)tbl.map[f]=-1;
+  tbl.map[k]=i;
+  if(tbl.hi>=0&&i>=0){const h=norm(tbl.rows[tbl.hi][i]);if(h){for(const x in saved)if(saved[x]===k)delete saved[x];saved[h]=k;try{localStorage.setItem('colmap',JSON.stringify(saved))}catch(_){}}}
+  applyMap();render();
+});
+$('hasHead').addEventListener('change',()=>{
+  const first=tbl.rows.findIndex(r=>r&&r.some(c=>cell(c)));
+  tbl.hi=$('hasHead').checked?Math.max(first,0):-1;
+  tbl.head=tbl.head.map((h,i)=>tbl.hi>=0&&cell(tbl.rows[tbl.hi][i])?cell(tbl.rows[tbl.hi][i]):'Stĺpec '+String.fromCharCode(65+i%26));
+  applyMap();render();
+});
 function timeField(id,dflt=0){const v=$(id).value.trim();if(!v)return dflt;const n=parseTimeSec(v);return n==null?dflt:n}
 const offset=()=>timeField('offset');
 $('split').addEventListener('input',render);
